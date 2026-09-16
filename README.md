@@ -1,93 +1,112 @@
 # ESG — Entorno Seguro y Gestión
 
-Sistema de gestión de tickets identificado por PC, desarrollado con PHP 8+, PDO, MySQL, Bootstrap 5, JavaScript vanilla, SweetAlert2 y FontAwesome.
+Versión corregida: 1.1.0.
 
-## Requisitos
-- PHP 8.0 o superior.
-- MySQL 5.7+ o MariaDB compatible.
-- Apache 2.4+ o Nginx con PHP-FPM.
-- Extensiones PHP: PDO, pdo_mysql, fileinfo y GD.
-- Permiso de escritura en `uploads/`.
-- JavaScript habilitado en el navegador.
+## Punto importante
+
+Un navegador no permite que PHP obtenga el `gethostname()` de Windows del equipo cliente. Esta versión identifica cada PC por su **IP cliente** (`REMOTE_ADDR`).
+
+La PC que ejecuta `instalar.php` queda como SuperAdmin y su IP se guarda en `includes/config.local.php`.
 
 ## Instalación
-1. Suba la carpeta `esg-app` al servidor web.
-2. Dé permisos de escritura a `uploads/` (por ejemplo, `chmod 755 uploads`; adapte permisos al usuario del servidor).
-3. Cree una base de datos MySQL o permita que el instalador la cree.
-4. Abra `https://tudominio.com/esg-app/instalar.php`.
-5. Introduzca host, usuario, contraseña y nombre de la base de datos.
-6. Pulse **Instalar ESG**. El instalador crea las tablas y registra la PC instaladora como único SuperAdmin.
-7. Elimine `instalar.php` inmediatamente después de finalizar.
-8. La PC SuperAdmin debe acceder a `admin.php`. Las demás PCs acceden a `index.php`.
 
-## Identificación
-No se utilizan correos ni contraseñas. El identificador principal es `gethostname()`. El nombre de usuario intenta obtenerse mediante `get_current_user()`; en entornos donde no sea útil, se utiliza un identificador alternativo basado en el nombre de PC.
+1. Subí `esg-app` a `/var/www/html/esg`.
+2. Asegurá PHP 8+, MySQL y PDO MySQL:
+   ```bash
+   sudo apt update
+   sudo apt install php php-mysql php-fileinfo -y
+   ```
+3. Dale permisos de escritura:
+   ```bash
+   sudo chown -R www-data:www-data /var/www/html/esg/uploads
+   sudo chmod -R 775 /var/www/html/esg/uploads
+   sudo chown www-data:www-data /var/www/html/esg/includes
+   sudo chmod 775 /var/www/html/esg/includes
+   ```
+4. Abrí:
+   `http://IP_DEL_SERVIDOR/esg/instalar.php`
+5. Indicá host, base, usuario y contraseña MySQL.
+6. Ejecutá la instalación.
+7. El instalador crea `includes/config.local.php`, crea las tablas y registra la IP instaladora como SuperAdmin.
+8. Eliminá `instalar.php`:
+   ```bash
+   sudo rm /var/www/html/esg/instalar.php
+   ```
+9. SuperAdmin:
+   `http://IP_DEL_SERVIDOR/esg/admin.php`
+10. Usuarios:
+   `http://IP_DEL_SERVIDOR/esg/index.php`
 
-**Importante:** `get_current_user()` en PHP normalmente identifica al propietario del script/proceso y no necesariamente al usuario interactivo de Windows. La aplicación no realiza detección de hardware.
+## Actualización con Git
 
-## Roles
-- **SuperAdmin:** único; corresponde a la PC registrada durante la instalación. Solo usa `admin.php`.
-- **Usuario:** se registra automáticamente al primer acceso y solo utiliza `index.php`.
+En la PC:
+```bash
+git add .
+git commit -m "Actualizar ESG"
+git push
+```
 
-Las rutas verifican el rol y redirigen automáticamente si se intenta abrir el panel equivocado. La API vuelve a comprobar permisos en cada acción.
+En el servidor:
+```bash
+cd /var/www/html/esg
+sudo git config --global --add safe.directory /var/www/html/esg
+sudo git pull
+```
 
-## Tickets
-Los usuarios crean tickets con título, descripción mínima de 10 caracteres y foto opcional. Las fotos admitidas son JPG/JPEG/PNG y el límite es 5 MB.
+No subas `includes/config.local.php`; contiene la contraseña de MySQL.
 
-El SuperAdmin puede aprobar, rechazar con motivo, resolver y eliminar tickets. También puede cambiar manualmente el estado de cada PC: buena, lenta o fallando.
+## Instalación existente
 
-## Base de datos
-`database.sql` contiene las tablas `usuarios`, `tickets` y `configuracion`. El instalador ejecuta este archivo automáticamente.
+Si ya tenés la base de datos de una versión anterior que registraba el hostname del servidor como SuperAdmin, la base debe migrarse para que el SuperAdmin use la IP de su PC.
 
-## Verificación
-Abra `verificar_db.php` para comprobar conexión, tablas, usuarios y existencia del SuperAdmin.
+Ejemplo:
+```sql
+UPDATE usuarios
+SET pc_identificador='10.24.96.50', rol='superadmin', activo=TRUE
+WHERE rol='superadmin'
+LIMIT 1;
+```
 
-## Apache / uploads
-`uploads/.htaccess` contiene `Require all denied` para evitar acceso HTTP directo a los archivos subidos. En Nginx, configure también una regla equivalente que deniegue acceso directo a `/uploads/`.
+Y `includes/config.local.php` debe contener:
+```php
+<?php
+return [
+  'host' => 'localhost',
+  'name' => 'esg',
+  'user' => 'esg_user',
+  'pass' => 'TU_CONTRASEÑA',
+  'admin_ip' => '10.24.96.50'
+];
+```
 
-## Solución de problemas
-### No conecta MySQL
-Compruebe host, usuario, contraseña, nombre de BD y que `pdo_mysql` esté instalado.
+La IP debe ser la IP de la **PC administradora**, no la del servidor.
 
-### No permite subir fotos
-Compruebe permisos de `uploads/` y que PHP tenga habilitadas las subidas (`file_uploads`) y un `upload_max_filesize` de al menos 5M.
+## Funciones
 
-### Todos aparecen como la misma PC
-`gethostname()` identifica el equipo desde el que ejecuta PHP. Si varios usuarios acceden mediante el mismo servidor/proxy, PHP puede ver el hostname del servidor y no el nombre del equipo cliente. Esta limitación es inherente a la identificación por `gethostname()`.
+Usuario: crea tickets, adjunta JPG/JPEG/PNG de hasta 5 MB, consulta sus tickets y ve el estado de su PC.
 
-### El instalador dice que ya existe SuperAdmin
-La instalación se bloquea deliberadamente. No reinstale encima de una instalación existente sin una copia de seguridad de la base de datos.
+SuperAdmin: ve estadísticas, todos los tickets, aprueba, rechaza con motivo, resuelve, elimina, activa/desactiva usuarios y asigna estado de PC.
 
-### Nginx
-Nginx no interpreta `.htaccess`; añada una regla de denegación para `/uploads/` en la configuración del servidor y recargue Nginx.
+Estados de ticket: 🟡 Pendiente, 🟢 Aprobado, 🔴 Rechazado, 🔵 Resuelto.
+
+Estados de PC: 🟢 Buena, 🟡 Lenta, 🔴 Fallando.
 
 ## Seguridad
-- PDO y consultas preparadas.
-- Validación de rol en cada endpoint.
-- Token CSRF para acciones POST.
-- Validación MIME y tamaño de imágenes.
-- Archivos de subida sin acceso HTTP directo bajo Apache.
-- No se detecta hardware ni se almacenan contraseñas.
 
-## Estructura
-```text
-esg-app/
-├── assets/css/estilo.css
-├── assets/js/app.js
-├── includes/config.php
-├── includes/auth.php
-├── uploads/.htaccess
-├── uploads/.gitkeep
-├── index.php
-├── admin.php
-├── logout.php
-├── api.php
-├── instalar.php
-├── verificar_db.php
-├── database.sql
-└── README.md
+PDO/prepared statements, control de rol en cada endpoint, validación de imágenes, nombres aleatorios de archivos, `.htaccess` en uploads y credenciales locales fuera de Git.
+
+## Problemas comunes
+
+`Access denied for user`: verificá usuario/contraseña con:
+```bash
+mysql -u esg_user -p esg
 ```
-# esg
-# esg
-# esg
-# esg
+
+`dubious ownership`:
+```bash
+git config --global --add safe.directory /var/www/html/esg
+```
+
+Todas las PCs entran como SuperAdmin: verificá que `admin_ip` sea la IP de la PC administradora y que el único registro `superadmin` tenga esa misma IP.
+
+IP dinámica: reservá la IP del SuperAdmin en DHCP para que no cambie.

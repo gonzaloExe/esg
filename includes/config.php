@@ -1,105 +1,75 @@
 <?php
+declare(strict_types=1);
+
 /**
- * ESG - Configuración y funciones básicas.
- *
- * Las credenciales de MySQL se guardan en includes/config.local.php,
- * archivo generado automáticamente por instalar.php y que NO debe
- * subirse a GitHub.
+ * ESG - Configuración principal.
+ * Las credenciales pueden estar en includes/config.local.php.
+ * Ese archivo no debe subirse a Git.
  */
-session_start();
+define('APP_NAME', 'ESG — Entorno Seguro y Gestión');
+define('APP_VERSION', '1.1.0');
+date_default_timezone_set('America/Argentina/Buenos_Aires');
 
-define('ESG_VERSION', '1.0');
+$local = __DIR__ . '/config.local.php';
 
-// Valores por defecto para una instalación nueva.
-$dbConfig = [
-    'host' => getenv('ESG_DB_HOST') ?: 'localhost',
-    'name' => getenv('ESG_DB_NAME') ?: 'esg',
-    'user' => getenv('ESG_DB_USER') ?: 'root',
-    'pass' => getenv('ESG_DB_PASS') ?: '',
-];
-
-// El instalador genera este archivo con las credenciales reales.
-$localConfig = __DIR__ . '/config.local.php';
-if (is_file($localConfig)) {
-    $local = require $localConfig;
-    if (is_array($local)) {
-        $dbConfig = array_merge($dbConfig, $local);
-    }
+if (is_file($local)) {
+    $cfg = require $local;
+    $cfg = is_array($cfg) ? $cfg : [];
+} else {
+    $cfg = [];
 }
 
-define('DB_HOST', $dbConfig['host']);
-define('DB_NAME', $dbConfig['name']);
-define('DB_USER', $dbConfig['user']);
-define('DB_PASS', $dbConfig['pass']);
+define('DB_HOST', (string)($cfg['host'] ?? 'localhost'));
+define('DB_NAME', (string)($cfg['name'] ?? 'esg'));
+define('DB_USER', (string)($cfg['user'] ?? 'esg_user'));
+define('DB_PASS', (string)($cfg['pass'] ?? ''));
+define('ADMIN_IP', (string)($cfg['admin_ip'] ?? ''));
 
-function db(bool $allowMissing = false): ?PDO {
+function conectarBD(): PDO
+{
     static $pdo = null;
     if ($pdo instanceof PDO) return $pdo;
-    try {
-        $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4';
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+
+    $pdo = new PDO(
+        'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+        DB_USER,
+        DB_PASS,
+        [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
-        return $pdo;
-    } catch (Throwable $e) {
-        if ($allowMissing) return null;
-        throw $e;
-    }
+            PDO::ATTR_EMULATE_PREPARES => false
+        ]
+    );
+    return $pdo;
 }
 
-function e($value): string {
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-}
-
-function jsonResponse(array $data, int $status = 200): never {
-    http_response_code($status);
+function responderJson(array $datos, int $codigo = 200): never
+{
+    http_response_code($codigo);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    echo json_encode($datos, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
-function requestJson(): array {
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw ?: '{}', true);
-    return is_array($data) ? $data : [];
+function e(?string $valor): string
+{
+    return htmlspecialchars((string)$valor, ENT_QUOTES, 'UTF-8');
 }
 
-function csrfToken(): string {
-    if (empty($_SESSION['csrf'])) {
-        $_SESSION['csrf'] = bin2hex(random_bytes(32));
-    }
-    return $_SESSION['csrf'];
+function ipCliente(): string
+{
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    return filter_var($ip, FILTER_VALIDATE_IP) ? $ip : 'desconocida';
 }
 
-function verifyCsrf(?string $token): void {
-    if (!$token || !hash_equals($_SESSION['csrf'] ?? '', $token)) {
-        jsonResponse(['ok' => false, 'error' => 'Token de seguridad inválido.'], 419);
-    }
-}
-
-function getPcData(): array {
-    $host = gethostname() ?: 'PC-DESCONOCIDA';
-    $user = function_exists('get_current_user') ? get_current_user() : '';
-    if (!$user) $user = 'usuario_' . substr(md5($host), 0, 6);
-
-    return [
-        'pc_nombre' => $host,
-        'usuario' => $user,
-        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'No detectada',
-        'fecha' => date('Y-m-d H:i:s')
-    ];
-}
-
-function installationReady(): bool {
+function estaInstalado(): bool
+{
     try {
-        $pdo = db(true);
-        if (!$pdo) return false;
-
-        $q = $pdo->query("SELECT COUNT(*) FROM usuarios WHERE rol='superadmin'");
-        return (int)$q->fetchColumn() > 0;
-    } catch (Throwable $e) {
+        $pdo = conectarBD();
+        $q = $pdo->query("SHOW TABLES LIKE 'usuarios'");
+        if (!$q->fetch()) return false;
+        return (int)$pdo->query("SELECT COUNT(*) FROM usuarios WHERE rol='superadmin'")->fetchColumn() > 0;
+    } catch (Throwable) {
         return false;
     }
 }
